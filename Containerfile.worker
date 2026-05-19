@@ -1,0 +1,86 @@
+# Combined Containerfile for the codecov Worker image.
+# Merges docker/Dockerfile.requirements + docker/Dockerfile into a single
+# self-contained build so Konflux can build it without a pre-built base image.
+
+ARG PYTHON_IMAGE=ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+
+# =============================================================================
+# Stage 1 — Build wheels for all dependencies (from Dockerfile.requirements)
+# =============================================================================
+FROM $PYTHON_IMAGE AS requirements-build
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libffi-dev \
+    libpq-dev \
+    libxml2-dev \
+    libxslt-dev \
+    git \
+    curl
+
+ARG RUST_VERSION=stable
+ENV RUST_VERSION=${RUST_VERSION}
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | bash -s -- -y --profile minimal --default-toolchain $RUST_VERSION
+ENV PATH="/root/.cargo/bin:$PATH"
+
+ENV UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1 \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_PYTHON=python \
+    UV_PROJECT_ENVIRONMENT=/app
+
+COPY pyproject.toml uv.lock ./
+COPY libs/shared libs/shared
+
+RUN uv export --no-group dev --no-hashes --frozen --format requirements-txt > requirements.txt
+
+RUN grep -v '^-e ' requirements.txt > requirements.remote.txt
+
+RUN pip wheel -w /wheels --find-links /wheels -r /requirements.remote.txt
+
+RUN uv build --all-packages --wheel -o /wheels
+
+# =============================================================================
+# Stage 2 — Install wheels into a clean runtime image (from Dockerfile.requirements)
+# =============================================================================
+FROM $PYTHON_IMAGE AS requirements
+
+RUN apt-get update && apt-get install -y \
+    libxml2-dev \
+    libxslt-dev \
+    libpq-dev \
+    libexpat1 \
+    make
+
+COPY --from=requirements-build /wheels/ /wheels/
+
+COPY pyproject.toml uv.lock ./
+COPY libs/shared libs/shared
+
+RUN uv pip install --no-deps --no-index --find-links=/wheels /wheels/* --system
+
+# =============================================================================
+# Stage 3 — Build the Worker application image (from Dockerfile)
+# =============================================================================
+FROM requirements AS app
+
+RUN adduser --system codecov --uid 1001 --home /home/codecov
+COPY --chown=1001:1001 --chmod=744 . /app
+USER 1001
+
+ARG RELEASE_VERSION
+ENV RELEASE_VERSION=$RELEASE_VERSION
+
+WORKDIR /app/apps/worker
+ENV RUN_ENV="ENTERPRISE"
+
+# self-hosted-runtime: extra deps for environments without native postgres/tls
+USER root
+ARG EXTERNAL_DEPS_FOLDER=./external_deps
+RUN mkdir $EXTERNAL_DEPS_FOLDER \
+    && pip install --target $EXTERNAL_DEPS_FOLDER psycopg2-binary tlslite-ng \
+    && chown 1001:1001 $EXTERNAL_DEPS_FOLDER
+USER 1001
+
+ENTRYPOINT ["./worker.sh"]
