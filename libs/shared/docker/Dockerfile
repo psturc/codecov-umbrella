@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.4
+# syntax=docker/dockerfile:1.24
 ARG REQUIREMENTS_IMAGE
 
 ARG PYTHON_IMAGE=ghcr.io/astral-sh/uv:python3.13-bookworm-slim
