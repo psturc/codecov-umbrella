@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.4
+# syntax=docker/dockerfile:1.24
 ARG REQUIREMENTS_IMAGE
 
 FROM $REQUIREMENTS_IMAGE as test_reqs
