@@ -31,7 +31,7 @@ dependencies = [
     "redis>=4.4.4",
     "requests>=2.32.3",
     "sentry-sdk>=2.13.0",
-    "sqlalchemy<2",
+    "sqlalchemy<3",
     "zstandard>=0.23.0",
     "pydantic>=2.10.4",
     "amplitude-analytics>=1.1.4",
